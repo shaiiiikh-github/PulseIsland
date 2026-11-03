@@ -1,0 +1,395 @@
+<Window x:Class="PulseIsland.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:PulseIsland"
+        xmlns:vm="clr-namespace:PulseIsland.ViewModels"
+        mc:Ignorable="d"
+        Title="PulseIsland"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        Width="460"
+        Height="460"
+        Topmost="{Binding IsTopmost}"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"
+        Typography.NumeralAlignment="Tabular">
+
+    <Window.Resources>
+        <!-- Slow breathing red edge glow for thermal throttling (1.6s loop) -->
+        <Storyboard x:Key="ThrottleBreathStoryboard" RepeatBehavior="Forever" AutoReverse="True">
+            <ColorAnimation Storyboard.TargetName="GlowBorder"
+                            Storyboard.TargetProperty="(Border.BorderBrush).(SolidColorBrush.Color)"
+                            From="#00FF453A" To="#B8FF453A" Duration="0:0:0.8" />
+        </Storyboard>
+
+        <!-- Right-click Context Menu Style -->
+        <Style TargetType="ContextMenu">
+            <Setter Property="Background" Value="#F2161B22"/>
+            <Setter Property="Foreground" Value="#F0F6FC"/>
+            <Setter Property="BorderBrush" Value="#25FFFFFF"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="4"/>
+            <Setter Property="HasDropShadow" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContextMenu">
+                        <Border Background="#F212151A"
+                                BorderBrush="#25FFFFFF"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Padding="4">
+                            <Border.Effect>
+                                <DropShadowEffect BlurRadius="16" ShadowDepth="4" Direction="270" Color="#000000" Opacity="0.5"/>
+                            </Border.Effect>
+                            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="MenuItem">
+            <Setter Property="Foreground" Value="#E6EDF3"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Border x:Name="ItemBorder" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="20" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <Path x:Name="CheckMark" Grid.Column="0"
+                                      Visibility="Collapsed"
+                                      VerticalAlignment="Center" HorizontalAlignment="Left"
+                                      Data="M 0 5 L 4 9 L 10 1"
+                                      Stroke="#30D158" StrokeThickness="2" />
+
+                                <ContentPresenter Grid.Column="1" ContentSource="Header" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="2" Text="{TemplateBinding InputGestureText}" Foreground="#8B949E" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                                <Popup x:Name="PART_Popup" AllowsTransparency="True" Focusable="False"
+                                       IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}">
+                                    <Border Background="#F212151A" BorderBrush="#25FFFFFF" BorderThickness="1" CornerRadius="8" Padding="4">
+                                        <Border.Effect>
+                                            <DropShadowEffect BlurRadius="14" ShadowDepth="4" Color="#000000" Opacity="0.5"/>
+                                        </Border.Effect>
+                                        <StackPanel IsItemsHost="True"/>
+                                    </Border>
+                                </Popup>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="CheckMark" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="#2230D158"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Separator">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Separator">
+                        <Border Height="1" Background="#20FFFFFF" Margin="4,3"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <!-- Transparent Window Root Grid: null background ensures clicks outside the shape pass through -->
+    <Grid Background="{x:Null}">
+        <!-- Dynamic Island Outer Container (Centered horizontally at top) -->
+        <Grid x:Name="IslandRoot"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Top"
+              Margin="0,0,0,0"
+              Width="300"
+              Height="44"
+              Background="Transparent"
+              RenderTransformOrigin="0.5, 0.0"
+              Cursor="Hand"
+              MouseLeftButtonDown="OnIslandMouseLeftButtonDown"
+              MouseMove="OnIslandMouseMove"
+              MouseLeftButtonUp="OnIslandMouseLeftButtonUp"
+              MouseEnter="OnIslandMouseEnter"
+              MouseLeave="OnIslandMouseLeave">
+
+            <Grid.RenderTransform>
+                <ScaleTransform x:Name="IslandScale" ScaleX="1.0" ScaleY="1.0"/>
+            </Grid.RenderTransform>
+
+            <Grid.ContextMenu>
+                <ContextMenu>
+                    <!-- Position Controls -->
+                    <MenuItem Header="Lock Position" IsCheckable="True" IsChecked="{Binding IsPositionLocked}" Command="{Binding TogglePositionLockCommand}"/>
+                    <MenuItem Header="Reset to Center" Command="{Binding ResetCenterCommand}"/>
+                    <Separator/>
+                    <!-- Mode Controls -->
+                    <MenuItem Header="Mode">
+                        <MenuItem Header="Island (Floating)" Command="{Binding SwitchPositionModeCommand}" CommandParameter="Island"/>
+                        <MenuItem Header="Notch (Top Flush)" Command="{Binding SwitchPositionModeCommand}" CommandParameter="Notch"/>
+                    </MenuItem>
+                    <MenuItem Header="Pin on Top" IsCheckable="True" IsChecked="{Binding IsTopmost}" Command="{Binding TogglePinCommand}"/>
+                    <MenuItem Header="Click-Through Mode" InputGestureText="Ctrl+Alt+I" IsCheckable="True" IsChecked="{Binding ClickThroughMode}" Command="{Binding ToggleClickThroughCommand}"/>
+                    <MenuItem Header="Auto-Hide in Fullscreen" IsCheckable="True" IsChecked="{Binding AutoHideInFullscreen}" Command="{Binding ToggleFullscreenHideCommand}"/>
+                    <Separator/>
+                    <MenuItem Header="Theme">
+                        <MenuItem Header="Glass (iOS Pure Black)" Command="{Binding ChangeThemeCommand}" CommandParameter="Glass"/>
+                        <MenuItem Header="Solid Dark" Command="{Binding ChangeThemeCommand}" CommandParameter="SolidDark"/>
+                        <MenuItem Header="AMOLED" Command="{Binding ChangeThemeCommand}" CommandParameter="AMOLED"/>
+                    </MenuItem>
+                    <MenuItem Header="Accent Color">
+                        <MenuItem Header="Neon Green" Command="{Binding ChangeAccentColorCommand}" CommandParameter="#30D158"/>
+                        <MenuItem Header="Sky Blue" Command="{Binding ChangeAccentColorCommand}" CommandParameter="#38BDF8"/>
+                        <MenuItem Header="Gold Yellow" Command="{Binding ChangeAccentColorCommand}" CommandParameter="#FFD60A"/>
+                        <MenuItem Header="Coral Orange" Command="{Binding ChangeAccentColorCommand}" CommandParameter="#FF9F0A"/>
+                        <MenuItem Header="Crimson Red" Command="{Binding ChangeAccentColorCommand}" CommandParameter="#FF453A"/>
+                    </MenuItem>
+                    <Separator/>
+                    <MenuItem Header="Start with Windows" IsCheckable="True" IsChecked="{Binding StartWithWindows}" Command="{Binding ToggleStartWithWindowsCommand}"/>
+                    <MenuItem Header="Hardware Diagnostics Log..." Command="{Binding OpenDiagnosticsCommand}"/>
+                    <Separator/>
+                    <MenuItem Header="Exit PulseIsland" Command="{Binding ExitCommand}"/>
+                </ContextMenu>
+            </Grid.ContextMenu>
+
+            <!-- Shadow, Squircle Geometry, and Inner Edge -->
+            <Path x:Name="SquircleShadowPath"
+                  Fill="#F5000000"
+                  Stretch="None">
+                <Path.Effect>
+                    <DropShadowEffect BlurRadius="24" ShadowDepth="6" Direction="270" Color="#000000" Opacity="0.25"/>
+                </Path.Effect>
+            </Path>
+
+            <!-- Main Squircle Fill with 0.5px 8% white inner stroke -->
+            <Path x:Name="SquircleShapePath"
+                  Fill="{Binding IslandBackground}"
+                  Stroke="{Binding IslandBorderBrush}"
+                  StrokeThickness="0.6"
+                  Stretch="None" />
+
+            <!-- Breathing edge glow border for thermal throttle -->
+            <Border x:Name="GlowBorder"
+                    BorderThickness="1"
+                    BorderBrush="#00FF453A"
+                    Background="Transparent"
+                    IsHitTestVisible="False"/>
+
+            <!-- ================= COLLAPSED PILL VIEW ================= -->
+            <Grid x:Name="CollapsedView"
+                  Height="44"
+                  VerticalAlignment="Top"
+                  HorizontalAlignment="Stretch"
+                  Margin="16,0,16,0">
+
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Left: Monoline Thermometer Icon + CPU Temp -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
+                    <Path Data="M 6.5,2 C 5.1,2 4,3.1 4,4.5 L 4,13.2 C 2.8,14.3 2,15.8 2,17.5 C 2,20.5 4.5,23 7.5,23 C 10.5,23 13,20.5 13,17.5 C 13,15.8 12.2,14.3 11,13.2 L 11,4.5 C 11,3.1 9.9,2 8.5,2 Z"
+                          Fill="Transparent"
+                          Stroke="{Binding CpuTempBrush}"
+                          StrokeThickness="1.4"
+                          StrokeLineJoin="Round"
+                          Width="13" Height="19"
+                          Stretch="Uniform"
+                          VerticalAlignment="Center"
+                          Margin="0,0,7,0" />
+
+                    <TextBlock Text="{Binding CpuTempText}"
+                               FontSize="14.5"
+                               FontWeight="SemiBold"
+                               Foreground="{Binding CpuTempBrush}"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+
+                <!-- Center: Subtle Soft Dot Divider -->
+                <Ellipse Grid.Column="1" Width="3" Height="3" Fill="#35FFFFFF" VerticalAlignment="Center"/>
+
+                <!-- Right: Monoline Fan Icon + Fan RPM (or Run as admin hint) -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
+                    <Path Data="M 12,12 m -3,0 a 3,3 0 1,0 6,0 a 3,3 0 1,0 -6,0 M 12,9 C 12,5 15,2 18,2 C 18,6 15,9 12,9 M 15,12 C 19,12 22,15 22,18 C 18,18 15,15 15,12 M 12,15 C 12,19 9,22 6,22 C 6,18 9,15 12,15 M 9,12 C 5,12 2,9 2,6 C 6,6 9,9 9,12"
+                          Fill="Transparent"
+                          Stroke="#99FFFFFF"
+                          StrokeThickness="1.3"
+                          StrokeLineJoin="Round"
+                          Width="14" Height="14"
+                          Stretch="Uniform"
+                          VerticalAlignment="Center"
+                          Margin="0,0,6,0" />
+
+                    <TextBlock Text="{Binding FanRpmText}"
+                               FontSize="13.5"
+                               FontWeight="Normal"
+                               Foreground="#E5FFFFFF"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+
+            <!-- ================= EXPANDED CARD VIEW ================= -->
+            <Grid x:Name="ExpandedView"
+                  Opacity="0"
+                  Visibility="Collapsed"
+                  Margin="14,14,14,14">
+
+                <Grid.RenderTransform>
+                    <TranslateTransform x:Name="ExpandedViewTransform" Y="0"/>
+                </Grid.RenderTransform>
+
+                <Grid.RowDefinitions>
+                    <!-- Per-Core Compact Chips (Exactly 12: P1-P4, E1-E8) -->
+                    <RowDefinition Height="Auto" />
+                    <!-- Rounded Tiles Grid (6 Tiles) -->
+                    <RowDefinition Height="*" />
+                    <!-- Sparkline -->
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- ROW 0: Exactly 12 Cores: P1-P4, E1-E8 -->
+                <Border x:Name="TileCores" Grid.Row="0"
+                        Background="#1A1C1E"
+                        CornerRadius="10"
+                        Padding="4,3"
+                        Margin="0,0,0,6">
+                    <ItemsControl ItemsSource="{Binding CoreItems}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="#14FFFFFF" CornerRadius="4" Padding="5,2" Margin="2,1">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding CoreName}" FontSize="9" FontWeight="SemiBold" Foreground="#8AFFFFFF" Margin="0,0,3,0"/>
+                                        <TextBlock Text="{Binding Temperature}" FontSize="9.5" FontWeight="Bold" Foreground="{Binding TempBrush}"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Border>
+
+                <!-- ROW 1: 6 Dedicated Rounded Tiles (#1C1C1E, 16px radius, Auto Height, No Clipping) -->
+                <UniformGrid Grid.Row="1" Columns="2" Rows="3" Margin="0,0,0,6">
+                    <!-- TILE 1: CPU (Temp + Load Ring) -->
+                    <Border x:Name="TileCpu" Background="#1C1C1E" CornerRadius="14" Padding="10,6" Margin="3">
+                        <Grid VerticalAlignment="Center">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="CPU" FontSize="9.5" FontWeight="SemiBold" Foreground="#99FFFFFF"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                    <TextBlock Text="{Binding CpuTempText}" FontSize="15" FontWeight="SemiBold" Foreground="{Binding CpuTempBrush}"/>
+                                    <TextBlock Text=" · " FontSize="12" Foreground="#4DFFFFFF"/>
+                                    <TextBlock Text="{Binding CpuTotalLoadText}" FontSize="12" FontWeight="Normal" Foreground="#99FFFFFF" VerticalAlignment="Bottom" Margin="0,0,0,1"/>
+                                </StackPanel>
+                            </StackPanel>
+                            <!-- Mini circular round-cap progress indicator -->
+                            <Grid Grid.Column="1" Width="26" Height="26" VerticalAlignment="Center">
+                                <Ellipse Width="26" Height="26" Stroke="#20FFFFFF" StrokeThickness="2.5"/>
+                                <Path x:Name="CpuLoadArcPath" Stroke="#30D158" StrokeThickness="2.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <!-- TILE 2: Fan Speed -->
+                    <Border x:Name="TileFan" Background="#1C1C1E" CornerRadius="14" Padding="10,6" Margin="3">
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="COOLING FAN" FontSize="9.5" FontWeight="SemiBold" Foreground="#99FFFFFF"/>
+                            <TextBlock Text="{Binding FanRpmText}" FontSize="14" FontWeight="SemiBold" Foreground="#E5FFFFFF" Margin="0,2,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- TILE 3: Dedicated GPU Tile -->
+                    <Border x:Name="TileGpu" Background="#1C1C1E" CornerRadius="14" Padding="10,6" Margin="3">
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="GPU (IRIS XE)" FontSize="9.5" FontWeight="SemiBold" Foreground="#99FFFFFF"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                <TextBlock Text="{Binding GpuLoadText}" FontSize="13" FontWeight="SemiBold" Foreground="#E5FFFFFF"/>
+                                <TextBlock Text=" · " FontSize="11" Foreground="#4DFFFFFF"/>
+                                <TextBlock Text="{Binding GpuTempText}" FontSize="11" Foreground="#99FFFFFF" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <TextBlock Text="{Binding GpuMemoryText}" FontSize="10" Foreground="#8AFFFFFF" Margin="0,1,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- TILE 4: Dedicated RAM Tile (Physical Memory Only) -->
+                    <Border x:Name="TileRam" Background="#1C1C1E" CornerRadius="14" Padding="10,6" Margin="3">
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="PHYSICAL RAM" FontSize="9.5" FontWeight="SemiBold" Foreground="#99FFFFFF"/>
+                            <TextBlock Text="{Binding RamText}" FontSize="11.5" FontWeight="SemiBold" Foreground="#E5FFFFFF" Margin="0,2,0,0"/>
+                            <TextBlock Text="{Binding RamPercentText}" FontSize="10" Foreground="#99FFFFFF"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- TILE 5: Dedicated Battery & Power Tile -->
+                    <Border x:Name="TileBattery" Background="#1C1C1E" CornerRadius="14" Padding="10,6" Margin="3">
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="BATTERY &amp; POWER" FontSize="9.5" FontWeight="SemiBold" Foreground="#99FFFFFF"/>
+                            <TextBlock Text="{Binding BatteryText}" FontSize="13" FontWeight="SemiBold" Foreground="#E5FFFFFF" Margin="0,2,0,0"/>
+                            <TextBlock Text="{Binding BatteryStatusText}" FontSize="9.5" Foreground="#99FFFFFF" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- TILE 6: Dedicated Network Tile (Physical Adapters Only) -->
+                    <Border x:Name="TileNetwork" Background="#1C1C1E" CornerRadius="14" Padding="10,6" Margin="3">
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="NETWORK THROUGHPUT" FontSize="9.5" FontWeight="SemiBold" Foreground="#99FFFFFF"/>
+                            <TextBlock Text="{Binding NetworkDownloadText}" FontSize="11" FontWeight="SemiBold" Foreground="#E5FFFFFF" Margin="0,2,0,0"/>
+                            <TextBlock Text="{Binding NetworkUploadText}" FontSize="10.5" Foreground="#99FFFFFF"/>
+                        </StackPanel>
+                    </Border>
+                </UniformGrid>
+
+                <!-- ROW 2: 60s CPU Temp Sparkline Tile -->
+                <Border x:Name="TileSparkline" Grid.Row="2" Background="#1C1C1E" CornerRadius="14" Padding="10,6">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="34"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+                            <TextBlock Text="CPU TEMPERATURE (60S)" FontSize="8.5" FontWeight="Bold" Foreground="#80FFFFFF"/>
+                            <TextBlock Text="{Binding SparklineMinMaxText}" FontSize="8.5" Foreground="#66FFFFFF" Margin="8,0,0,0"/>
+                        </StackPanel>
+
+                        <Grid Grid.Row="1">
+                            <Path Fill="#2530D158" Data="{Binding SparklineFillGeometry}" />
+                            <Polyline Points="{Binding SparklinePoints}"
+                                      Stroke="#30D158"
+                                      StrokeThickness="1.5"
+                                      StrokeLineJoin="Round"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"/>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

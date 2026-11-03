@@ -1,0 +1,33 @@
+## Build results
+[Bb]in/
+[Oo]bj/
+publish/
+publish_new/
+*.exe
+*.dll
+*.pdb
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Temporary sandbox folders
+.dotnet/
+.nuget/
+.appdata/
+.localappdata/
+
+## Generated diagnostics & reports
+sensors_diag.txt
+sensor_debug.log
+diag.txt
+fan_probe.txt
+selftest.txt
+asus_discovery.txt
+*.log
+
+## Visual Studio / VS Code
+.vs/
+.vscode/
+*.DotSettings.user
+
